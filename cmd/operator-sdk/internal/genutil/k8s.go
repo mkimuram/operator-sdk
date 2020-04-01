@@ -17,6 +17,7 @@ package genutil
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -51,6 +52,10 @@ func K8sCodegen() error {
 	fqApis := k8sutil.CreateFQAPIs(apisPkg, gvMap)
 	f := func(a string) error { return deepcopyGen(a, fqApis) }
 	if err = generateWithHeaderFile(f); err != nil {
+		return err
+	}
+
+	if err := clientGen(gvMap); err != nil {
 		return err
 	}
 
@@ -98,5 +103,43 @@ func deepcopyGen(hf string, fqApis []string) error {
 			return fmt.Errorf("deepcopy-gen generator error: %v", err)
 		}
 	}
+	return nil
+}
+
+func clientGen(gvMap map[string][]string) error {
+	image := "quay.io/slok/kube-code-generator:v1.16.7"
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to generate clientset code: %v", err)
+	}
+
+	repoPkg := projutil.GetGoPkg()
+
+	gvb := &strings.Builder{}
+	for g, vs := range gvMap {
+		for _, v := range vs {
+			gvb.WriteString(fmt.Sprintf("%s:%s,", g, v))
+		}
+	}
+	gvStr := strings.TrimSuffix(gvb.String(), ",")
+
+	clientGenArgs := []string{"run", "-it", "--rm",
+		"-v", wd + ":" + filepath.Join("/go", "src", repoPkg),
+		"-e", "PROJECT_PACKAGE=" + repoPkg,
+		"-e", "CLIENT_GENERATOR_OUT=" + filepath.Join(repoPkg, "pkg", "client"),
+		"-e", "APIS_ROOT=" + filepath.Join(repoPkg, "pkg", "apis"),
+		"-e", "GROUPS_VERSION=" + gvStr,
+		"-e", "GENERATION_TARGETS=\"deepcopy,client\"",
+		image,
+	}
+
+	log.Infof("Running clientset generation for Custom Resource group versions: [%s]\n", gvStr)
+
+	clientGenCmd := exec.Command("docker", clientGenArgs...)
+	if err := projutil.ExecCmd(clientGenCmd); err != nil {
+		return fmt.Errorf("failed to generate clientset code: %v", err)
+	}
+
 	return nil
 }
