@@ -113,6 +113,35 @@ func (ctx *Context) createFromYAML(yamlFile []byte, skipIfExists bool, cleanupOp
 			return fmt.Errorf("failed to unmarshal object spec: %w", err)
 		}
 		obj.SetNamespace(operatorNamespace)
+		switch obj.GetKind() {
+		case "ClusterRoleBinding":
+			// rename cluster-scope resource to avoid conflict
+			origName := obj.GetName()
+			obj.SetName(origName + operatorNamespace)
+			// modify namespace in subjects to operatorNamespace
+			if subjs, ok := obj.Object["subjects"].([]interface{}); ok {
+				for _, s := range subjs {
+					if subj, ok := s.(map[string]interface{}); ok {
+						if _, ok := subj["namespace"].(string); ok {
+							subj["namespace"] = operatorNamespace
+						}
+					}
+				}
+			}
+			// modify name in roleRef to renamed name if kind is ClusterRole
+			if roleRef, ok := obj.Object["roleRef"].(map[string]interface{}); ok {
+				if kind, ok := roleRef["kind"].(string); ok {
+					if kind == "ClusterRole" {
+						if _, ok := roleRef["name"].(string); ok {
+							roleRef["name"] = operatorNamespace
+						}
+					}
+				}
+			}
+		case "ClusterRole":
+			// rename cluster-scope resource to avoid conflict
+			obj.SetName(operatorNamespace)
+		}
 		err = ctx.client.Create(goctx.TODO(), obj, cleanupOptions)
 		if skipIfExists && apierrors.IsAlreadyExists(err) {
 			continue
