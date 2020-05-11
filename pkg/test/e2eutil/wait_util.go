@@ -27,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	logger "github.com/sirupsen/logrus"
 )
 
 // WaitForDeployment checks to see if a given deployment has a certain number of available replicas after a specified
@@ -48,14 +50,14 @@ func WaitForOperatorDeployment(t *testing.T, kubeclient kubernetes.Interface, na
 func waitForDeployment(t *testing.T, kubeclient kubernetes.Interface, namespace, name string, replicas int,
 	retryInterval, timeout time.Duration, isOperator bool) error {
 	if isOperator && test.Global.LocalOperator {
-		t.Log("Operator is running locally; skip waitForDeployment")
+		log(t, "Operator is running locally; skip waitForDeployment")
 		return nil
 	}
 	err := wait.Poll(retryInterval, timeout, func() (done bool, err error) {
 		deployment, err := kubeclient.AppsV1().Deployments(namespace).Get(name, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				t.Logf("Waiting for availability of Deployment: %s in Namespace: %s \n", name, namespace)
+				logf(t, "Waiting for availability of Deployment: %s in Namespace: %s \n", name, namespace)
 				return false, nil
 			}
 			return false, err
@@ -64,14 +66,14 @@ func waitForDeployment(t *testing.T, kubeclient kubernetes.Interface, namespace,
 		if int(deployment.Status.AvailableReplicas) >= replicas {
 			return true, nil
 		}
-		t.Logf("Waiting for full availability of %s deployment (%d/%d)\n", name,
+		logf(t, "Waiting for full availability of %s deployment (%d/%d)\n", name,
 			deployment.Status.AvailableReplicas, replicas)
 		return false, nil
 	})
 	if err != nil {
 		return err
 	}
-	t.Logf("Deployment available (%d/%d)\n", replicas, replicas)
+	logf(t, "Deployment available (%d/%d)\n", replicas, replicas)
 	return nil
 }
 
@@ -93,12 +95,28 @@ func WaitForDeletion(t *testing.T, dynclient client.Client, obj runtime.Object, 
 		if err != nil {
 			return false, err
 		}
-		t.Logf("Waiting for %s %s to be deleted\n", kind, key)
+		logf(t, "Waiting for %s %s to be deleted\n", kind, key)
 		return false, nil
 	})
 	if err != nil {
 		return err
 	}
-	t.Logf("%s %s was deleted\n", kind, key)
+	logf(t, "%s %s was deleted\n", kind, key)
 	return nil
+}
+
+func logf(t *testing.T, format string, args ...interface{}) {
+	if t != nil {
+		t.Logf(format, args...)
+	} else {
+		logger.Infof(format, args...)
+	}
+}
+
+func log(t *testing.T, args ...interface{}) {
+	if t != nil {
+		t.Log(args...)
+	} else {
+		logger.Info(args...)
+	}
 }
